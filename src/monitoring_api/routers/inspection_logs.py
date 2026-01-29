@@ -1,0 +1,50 @@
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, Query, HTTPException
+from sqlalchemy.orm import Session
+
+from src.monitoring_api.db import get_db
+from src.monitoring_api import crud
+from src.monitoring_api.schemas import InspectionLogOut
+
+router = APIRouter(prefix="/inspection-logs", tags=["inspection-logs"])
+
+
+@router.get("/latest", response_model=List[InspectionLogOut])
+def get_latest_inspection_logs(
+    count: int = Query(10, ge=1, le=200),
+    defects_only: bool = False,
+    model_name: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    return crud.get_latest_inspection_logs(
+        db=db,
+        count=count,
+        defects_only=defects_only,
+        model_name=model_name,
+    )
+
+
+@router.get("", response_model=List[InspectionLogOut])
+def list_inspection_logs(
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    defects_only: bool = False,
+    model_name: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    return crud.get_inspection_logs(
+        db=db,
+        limit=limit,
+        offset=offset,
+        defects_only=defects_only,
+        model_name=model_name,
+    )
+
+
+@router.get("/{log_id}", response_model=InspectionLogOut)
+def get_inspection_log(log_id: int, db: Session = Depends(get_db)):
+    record = crud.get_inspection_log(db, log_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Inspection log not found")
+    return record
