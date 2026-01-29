@@ -1,0 +1,38 @@
+# Main configuration file for real-time vision system
+
+# Video streaming configuration
+video:
+  source: 0  # 0 for default camera, or path to video file
+  width: 1280
+  height: 720
+  fps: 30
+  buffer_size: 30
+
+# Preprocessing configuration
+preprocessing:
+  target_size: [640, 640]
+  normalization:
+    enabled: true
+    mean: [0.485, 0.456, 0.406]
+    std: [0.229, 0.224, 0.225]
+
+# YOLO inference configuration
+yolo:
+  model_path: "models/yolov8n.pt"
+  model_type: "yolov8"
+  confidence_threshold: 0.5
+  nms_threshold: 0.4
+  device: "cuda"  # cuda, cpu, or mps
+
+# Logging configuration
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  log_file: "app.log"
+  log_dir: "logs"
+
+# Visualization configuration
+visualization:
+  show_fps: true
+  show_labels: true
+  bbox_thickness: 2
+  font_scale: 0.5

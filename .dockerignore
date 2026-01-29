@@ -1,0 +1,108 @@
+# Docker ignore file - exclude unnecessary files from build context
+
+# Git files
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+docs/
+wiki/
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.pydevproject
+.settings/
+.classpath
+
+# Virtual environments (not needed in container)
+venv/
+env/
+
+# Data and logs (if large)
+data/large_datasets/
+logs/old_logs/
+
+# Docker (no need to copy Docker files)
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Package managers
+Pipfile.lock
+poetry.lock
+yarn.lock
+
+# Temporary files
+*.tmp
+*.bak
+*.log
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db
+*.exe
+
+# Node (if any frontend)
+node_modules/
+npm-debug.log
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Cache files
+.cache/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Model cache (if using pre-downloaded models)
+models/cache/
+models/*.pt~

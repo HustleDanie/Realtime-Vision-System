@@ -1,0 +1,52 @@
+---
+# ConfigMap for YOLO Inference Service
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yolo-config
+  namespace: vision-system
+data:
+  LOG_LEVEL: "INFO"
+  CUDA_VISIBLE_DEVICES: "0"
+  MODEL_PATH: "yolov8n.pt"
+  PYTHONUNBUFFERED: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+---
+# ConfigMap for Logging Service
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logging-config
+  namespace: vision-system
+data:
+  LOG_LEVEL: "INFO"
+  MODEL_VERSION: "1.0"
+  MODEL_NAME: "yolov8-prod"
+  PYTHONUNBUFFERED: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+  DATABASE_TYPE: "sqlite"
+
+---
+# Secret for database credentials (update with real values in production)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+  namespace: vision-system
+type: Opaque
+stringData:
+  DATABASE_URL: "sqlite:///./vision_logs.db"
+  POSTGRES_USER: "vision_user"
+  POSTGRES_PASSWORD: "secure_password_here"
+
+---
+# ConfigMap for MLflow connection
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mlflow-config
+  namespace: vision-system
+data:
+  MLFLOW_TRACKING_URI: "http://mlflow-service:5000"
+  MLFLOW_REGISTRY_URI: "http://mlflow-service:5000"

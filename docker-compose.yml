@@ -1,0 +1,191 @@
+version: '3.8'
+
+services:
+  # MLflow Tracking Server
+  mlflow:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mlflow
+    container_name: mlflow-server
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow-data:/data
+    environment:
+      MLFLOW_BACKEND_STORE_URI: "sqlite:////data/db/mlflow.db"
+      MLFLOW_DEFAULT_ARTIFACT_ROOT: "/data/mlruns"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - vision-network
+
+  # Camera Stream Service
+  camera:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.camera
+    container_name: camera-stream
+    environment:
+      LOG_LEVEL: INFO
+      CAMERA_ID: 0
+    volumes:
+      - /dev/video0:/dev/video0  # Camera device (Linux)
+    restart: unless-stopped
+    networks:
+      - vision-network
+    depends_on:
+      - mlflow
+
+  # Preprocessing Service
+  preprocessing:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.preprocessing
+    container_name: preprocessing-service
+    environment:
+      LOG_LEVEL: INFO
+    restart: unless-stopped
+    networks:
+      - vision-network
+    depends_on:
+      - mlflow
+
+  # YOLO Inference Service (GPU-enabled)
+  yolo:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.yolo
+    container_name: yolo-inference
+    ports:
+      - "8000:8000"
+    environment:
+      LOG_LEVEL: INFO
+      CUDA_VISIBLE_DEVICES: 0
+      MODEL_PATH: "yolov8n.pt"
+    volumes:
+      - yolo-models:/app/models
+    restart: unless-stopped
+    networks:
+      - vision-network
+    depends_on:
+      - mlflow
+      - preprocessing
+    # GPU support (requires nvidia-docker)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # Logging Service
+  logging:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.logging
+    container_name: logging-service
+    ports:
+      - "8001:8001"
+    environment:
+      LOG_LEVEL: INFO
+      DATABASE_URL: "sqlite:///./vision_logs.db"
+      MODEL_VERSION: "1.0"
+      MODEL_NAME: "yolov8-prod"
+    volumes:
+      - logging-data:/app/data
+      - prediction-images:/app/prediction_images
+    restart: unless-stopped
+    networks:
+      - vision-network
+    depends_on:
+      - mlflow
+
+networks:
+  vision-network:
+    driver: bridge
+
+volumes:
+  mlflow-data:
+  yolo-models:
+  logging-data:
+  prediction-images:
+    stdin_open: true
+    tty: true
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: Development version with additional tools
+  vision-app-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      args:
+        PYTHON_VERSION: "3.10"
+    container_name: realtime-vision-dev
+    
+    # GPU support
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - CUDA_VISIBLE_DEVICES=0
+      - DISPLAY=${DISPLAY:-:0}
+    
+    volumes:
+      - ./:/app                                 # Full source code access
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    
+    devices:
+      - /dev/video0:/dev/video0
+    
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    
+    ports:
+      - "8001:8000"
+      - "5001:5000"
+      - "6006:6006"                            # TensorBoard
+      - "8888:8888"                            # Jupyter
+    
+    stdin_open: true
+    tty: true
+    
+    restart: unless-stopped
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Networks
+networks:
+  default:
+    name: vision-network
+    driver: bridge
+
+# Volumes for persistent data
+volumes:
+  vision-output:
+    driver: local
+  vision-logs:
+    driver: local

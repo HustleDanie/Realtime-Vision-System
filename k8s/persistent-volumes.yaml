@@ -1,0 +1,44 @@
+---
+# PersistentVolumeClaim for YOLO models
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: yolo-models-pvc
+  namespace: vision-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+# PersistentVolumeClaim for Logging database
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: logging-data-pvc
+  namespace: vision-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+# PersistentVolumeClaim for prediction images
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prediction-images-pvc
+  namespace: vision-system
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 50Gi

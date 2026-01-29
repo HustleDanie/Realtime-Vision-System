@@ -1,0 +1,41 @@
+# Dockerfile for the Python logging service (SQLAlchemy + image storage)
+# Lightweight CPU image (no CUDA) with OpenCV runtime deps for image IO.
+
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    APP_HOME=/app
+
+WORKDIR ${APP_HOME}
+
+# Install system dependencies for OpenCV image IO and build essentials
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libgl1 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for layer caching
+COPY requirements.txt ./
+
+# Install Python dependencies (assumes requirements.txt includes sqlalchemy, opencv-python, numpy, etc.)
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Create non-root user
+RUN useradd -m -u 1000 logger && chown -R logger:logger ${APP_HOME}
+USER logger
+
+# Expose optional API ports (if you wrap this in a service)
+EXPOSE 8000 5000
+
+# Default command can be overridden; here we run a no-op to keep container alive
+CMD ["python", "-c", "print('Logging service container ready')"]

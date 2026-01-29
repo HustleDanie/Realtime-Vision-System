@@ -1,0 +1,380 @@
+trigger:
+  none  # Only trigger via pipeline dispatch or webhook
+
+parameters:
+  - name: environment
+    displayName: 'Deployment Environment'
+    type: string
+    default: 'production'
+    values:
+      - staging
+      - production
+
+  - name: modelName
+    displayName: 'Model Name'
+    type: string
+    default: 'simple-cnn-demo'
+
+  - name: skipHealthCheck
+    displayName: 'Skip Health Checks'
+    type: boolean
+    default: false
+
+pr: none  # Disable PR triggers
+resources:
+  repositories:
+    - repository: self
+      trigger: none
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  dockerRegistryServiceConnection: 'acr-service-connection'
+  imageRepository: 'inference-service'
+  containerRegistry: '$(ACR_LOGIN_SERVER)'
+  dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
+  tag: '$(Build.BuildId)'
+  buildContext: '$(Build.SourcesDirectory)'
+  pythonVersion: '3.10'
+
+stages:
+  - stage: ValidateModel
+    displayName: 'Validate Model'
+    jobs:
+      - job: ValidateProduction
+        displayName: 'Validate Production Model'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '$(pythonVersion)'
+            displayName: 'Use Python $(pythonVersion)'
+
+          - script: |
+              python -m pip install --upgrade pip
+              pip install mlflow
+            displayName: 'Install Dependencies'
+
+          - script: |
+              python << 'EOF'
+              import mlflow
+              import sys
+              import os
+              
+              mlflow.set_tracking_uri('$(MLFLOW_TRACKING_URI)')
+              client = mlflow.tracking.MlflowClient()
+              
+              model_name = '$(modelName)'
+              print(f"Validating model: {model_name}")
+              
+              try:
+                  versions = client.get_latest_versions(model_name, stages=['Production'])
+                  if not versions:
+                      print(f"❌ No Production model found for {model_name}")
+                      sys.exit(1)
+                  
+                  version = versions[0]
+                  print(f"✓ Production model found: {model_name} v{version.version}")
+                  print(f"  Status: {version.status}")
+                  print(f"  Created: {version.creation_timestamp}")
+                  
+                  if version.status != 'READY':
+                      print(f"⚠ Warning: Model status is {version.status}")
+                  
+                  # Set output variable for next stages
+                  with open('$[variables['Build.ArtifactStagingDirectory']]/model-version.txt', 'w') as f:
+                      f.write(f"MODEL_VERSION={version.version}\n")
+                      f.write(f"MODEL_NAME={model_name}\n")
+                      
+              except Exception as e:
+                  print(f"❌ Error validating model: {e}")
+                  sys.exit(1)
+              EOF
+            displayName: 'Validate Model in MLflow'
+            env:
+              MLFLOW_TRACKING_URI: $(MLFLOW_TRACKING_URI)
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+              ArtifactName: 'model-info'
+            displayName: 'Publish Model Info'
+
+  - stage: BuildImage
+    displayName: 'Build Docker Image'
+    dependsOn: ValidateModel
+    jobs:
+      - job: BuildAndPush
+        displayName: 'Build and Push to ACR'
+        steps:
+          - task: DockerInstaller@0
+            displayName: 'Install Docker'
+
+          - task: Docker@2
+            displayName: 'Build image'
+            inputs:
+              command: build
+              repository: $(imageRepository)
+              dockerfile: $(dockerfilePath)
+              containerRegistry: $(dockerRegistryServiceConnection)
+              tags: |
+                $(tag)
+                latest
+              addBaseImageData: true
+              includeSourceTags: true
+              includeSourceBranch: true
+              arguments: |
+                --label "org.opencontainers.image.version=$(tag)"
+                --label "org.opencontainers.image.revision=$(Build.SourceVersion)"
+
+          - task: Docker@2
+            displayName: 'Push image to ACR'
+            inputs:
+              command: push
+              repository: $(imageRepository)
+              containerRegistry: $(dockerRegistryServiceConnection)
+              tags: |
+                $(tag)
+                latest
+
+          - script: |
+              echo "Image pushed: $(containerRegistry)/$(imageRepository):$(tag)"
+            displayName: 'Display Image Details'
+
+  - stage: DeployToAKS
+    displayName: 'Deploy to AKS'
+    dependsOn: BuildImage
+    condition: succeeded()
+    jobs:
+      - deployment: Deploy
+        displayName: 'Deploy to $(parameters.environment)'
+        environment: '${{ parameters.environment }}'
+        strategy:
+          runOnce:
+            preDeploy:
+              steps:
+                - task: KubectlInstaller@0
+                  displayName: 'Install kubectl'
+
+                - task: AzureCLI@2
+                  displayName: 'Get AKS Credentials'
+                  inputs:
+                    azureSubscription: $(azureSubscription)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      az aks get-credentials \
+                        --resource-group $(aksResourceGroup) \
+                        --name $(aksClusterName) \
+                        --overwrite-existing
+
+            deploy:
+              steps:
+                - task: KubernetesManifest@0
+                  displayName: 'Check Deployment Exists'
+                  inputs:
+                    action: 'getK8sManifests'
+                    kubeconnection: $(kubeConnection)
+                    namespace: '${{ parameters.environment }}'
+                    kubectl: kubectl
+                    command: 'get deployment inference-service -n ${{ parameters.environment }}'
+                  continueOnError: true
+
+                - task: Kubernetes@1
+                  displayName: 'Set Image in Deployment'
+                  inputs:
+                    kubeconnection: $(kubeConnection)
+                    namespace: '${{ parameters.environment }}'
+                    command: 'set image'
+                    arguments: 'deployment/inference-service inference-service=$(containerRegistry)/$(imageRepository):$(tag) -n ${{ parameters.environment }}'
+
+                - task: Kubernetes@1
+                  displayName: 'Update Model Environment Variables'
+                  inputs:
+                    kubeconnection: $(kubeConnection)
+                    namespace: '${{ parameters.environment }}'
+                    command: 'set env'
+                    arguments: |
+                      deployment/inference-service 
+                      MODEL_NAME=$(modelName)
+                      MLFLOW_TRACKING_URI=$(MLFLOW_TRACKING_URI)
+                      DEPLOYMENT_TIMESTAMP=$(Build.BuildNumber)
+                      -n ${{ parameters.environment }}
+
+                - task: Kubernetes@1
+                  displayName: 'Wait for Rollout'
+                  inputs:
+                    kubeconnection: $(kubeConnection)
+                    namespace: '${{ parameters.environment }}'
+                    command: 'rollout'
+                    arguments: 'status deployment/inference-service -n ${{ parameters.environment }} --timeout=10m'
+
+                - script: |
+                    kubectl get deployment inference-service -n ${{ parameters.environment }} -o wide
+                    kubectl get pods -n ${{ parameters.environment }} -l app=inference-service -o wide
+                  displayName: 'Display Deployment Status'
+                  condition: always()
+
+            postRouteTraffic:
+              steps:
+                - task: PowerShell@2
+                  displayName: 'Health Check'
+                  condition: and(succeeded(), eq('${{ parameters.skipHealthCheck }}', 'false'))
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      $maxAttempts = 30
+                      $delaySeconds = 2
+                      $attempt = 0
+                      
+                      Write-Host "Starting health checks..."
+                      
+                      while ($attempt -lt $maxAttempts) {
+                          try {
+                              # Try to get service IP
+                              $response = kubectl get service inference-service -n ${{ parameters.environment }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>$null
+                              
+                              if ($response -and $response -ne "pending") {
+                                  $healthUrl = "http://$response/health"
+                                  Write-Host "Checking: $healthUrl"
+                                  
+                                  $result = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 5
+                                  
+                                  if ($result.StatusCode -eq 200) {
+                                      Write-Host "✓ Health check passed"
+                                      exit 0
+                                  }
+                              }
+                          } catch {
+                              Write-Host "Attempt $($attempt + 1)/$maxAttempts - Service not ready, retrying..."
+                          }
+                          
+                          $attempt++
+                          Start-Sleep -Seconds $delaySeconds
+                      }
+                      
+                      Write-Host "✗ Health check failed after $maxAttempts attempts"
+                      exit 1
+
+            on:
+              failure:
+                steps:
+                  - task: Kubernetes@1
+                    displayName: 'Rollback Deployment'
+                    inputs:
+                      kubeconnection: $(kubeConnection)
+                      namespace: '${{ parameters.environment }}'
+                      command: 'rollout'
+                      arguments: 'undo deployment/inference-service -n ${{ parameters.environment }}'
+
+                  - script: |
+                      echo "##[error] Deployment failed. Rollback completed."
+                      kubectl rollout status deployment/inference-service -n ${{ parameters.environment }} --timeout=5m
+                    displayName: 'Verify Rollback'
+
+  - stage: TestDeployment
+    displayName: 'Test Deployed Model'
+    dependsOn: DeployToAKS
+    condition: succeeded()
+    jobs:
+      - job: RunTests
+        displayName: 'Run Integration Tests'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '$(pythonVersion)'
+
+          - script: |
+              pip install requests numpy pillow
+            displayName: 'Install Test Dependencies'
+
+          - task: AzureCLI@2
+            displayName: 'Port Forward to Service'
+            inputs:
+              azureSubscription: $(azureSubscription)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az aks get-credentials \
+                  --resource-group $(aksResourceGroup) \
+                  --name $(aksClusterName) \
+                  --overwrite-existing
+                
+                kubectl port-forward svc/inference-service 8000:80 -n ${{ parameters.environment }} &
+                sleep 5
+
+          - script: |
+              python << 'EOF'
+              import requests
+              import numpy as np
+              import time
+              
+              url = "http://localhost:8000/predict"
+              
+              print("Running test predictions...")
+              success_count = 0
+              
+              for i in range(5):
+                  try:
+                      # Create test input (28x28 grayscale image)
+                      test_data = np.random.rand(1, 1, 28, 28).astype(np.float32)
+                      
+                      response = requests.post(
+                          url,
+                          json={"data": test_data.tolist()},
+                          timeout=10
+                      )
+                      
+                      if response.status_code == 200:
+                          result = response.json()
+                          print(f"✓ Prediction {i+1} successful")
+                          success_count += 1
+                      else:
+                          print(f"⚠ Prediction {i+1} returned status {response.status_code}")
+                          
+                  except Exception as e:
+                      print(f"❌ Prediction {i+1} failed: {e}")
+                      time.sleep(1)
+              
+              if success_count >= 4:
+                  print(f"\n✓ Tests passed: {success_count}/5 successful predictions")
+                  exit(0)
+              else:
+                  print(f"\n❌ Tests failed: {success_count}/5 successful predictions")
+                  exit(1)
+              EOF
+            displayName: 'Run Predictions'
+
+  - stage: NotifySuccess
+    displayName: 'Deployment Success'
+    dependsOn: TestDeployment
+    condition: succeeded()
+    jobs:
+      - job: Notify
+        displayName: 'Send Success Notification'
+        steps:
+          - script: |
+              echo "## ✓ Deployment Successful" >> $(Build.ArtifactStagingDirectory)/summary.md
+              echo "" >> $(Build.ArtifactStagingDirectory)/summary.md
+              echo "Model **$(modelName)** has been successfully deployed to **${{ parameters.environment }}**." >> $(Build.ArtifactStagingDirectory)/summary.md
+              echo "" >> $(Build.ArtifactStagingDirectory)/summary.md
+              echo "- **Image**: $(containerRegistry)/$(imageRepository):$(tag)" >> $(Build.ArtifactStagingDirectory)/summary.md
+              echo "- **Environment**: ${{ parameters.environment }}" >> $(Build.ArtifactStagingDirectory)/summary.md
+              echo "- **Build**: [$(Build.BuildId)]($(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId))" >> $(Build.ArtifactStagingDirectory)/summary.md
+            displayName: 'Create Summary'
+
+  - stage: NotifyFailure
+    displayName: 'Deployment Failure'
+    dependsOn: TestDeployment
+    condition: failed()
+    jobs:
+      - job: Notify
+        displayName: 'Send Failure Notification'
+        steps:
+          - script: |
+              echo "## ❌ Deployment Failed" >> $(Build.ArtifactStagingDirectory)/summary.md
+              echo "" >> $(Build.ArtifactStagingDirectory)/summary.md
+              echo "Deployment of **$(modelName)** to **${{ parameters.environment }}** failed." >> $(Build.ArtifactStagingDirectory)/summary.md
+              echo "" >> $(Build.ArtifactStagingDirectory)/summary.md
+              echo "A rollback has been initiated. Review the [build logs]($(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)) for details." >> $(Build.ArtifactStagingDirectory)/summary.md
+            displayName: 'Create Failure Summary'

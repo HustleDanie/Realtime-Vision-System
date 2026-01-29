@@ -1,0 +1,55 @@
+# Stage 1: Builder
+FROM python:3.12-slim as builder
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    postgresql-client-common \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+
+RUN pip install --user --no-cache-dir wheel && \
+    pip wheel --no-cache-dir --no-deps --wheel-dir /build/wheels -r requirements.txt
+
+# Stage 2: Runtime
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -u 1000 mlflow
+
+COPY --from=builder /build/wheels /wheels
+COPY --from=builder /build/requirements.txt .
+
+RUN pip install --no-cache /wheels/*
+
+# Create directories for artifacts and database
+RUN mkdir -p /data/mlruns /data/db && \
+    chown -R mlflow:mlflow /data
+
+USER mlflow
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:5000/', timeout=5)" || exit 1
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV MLFLOW_HOME=/data
+ENV MLFLOW_BACKEND_STORE_URI=sqlite:////data/db/mlflow.db
+ENV MLFLOW_DEFAULT_ARTIFACT_ROOT=/data/mlruns
+
+EXPOSE 5000
+
+# Start MLflow tracking server
+CMD ["mlflow", "server", \
+     "--backend-store-uri", "sqlite:////data/db/mlflow.db", \
+     "--default-artifact-root", "/data/mlruns", \
+     "--host", "0.0.0.0", \
+     "--port", "5000"]

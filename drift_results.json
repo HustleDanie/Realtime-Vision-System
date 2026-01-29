@@ -1,0 +1,16 @@
+{
+  "baseline_dir": "./baseline_images",
+  "drifted_dir": "./drifted_images",
+  "baseline_images": 10,
+  "drifted_images": 40,
+  "drift_scores": {
+    "brightness_drift": 5.937026692708329,
+    "brightness_p_value": 0.010001831533413021,
+    "blur_drift": 1537.3117537456524,
+    "blur_p_value": 0.2906065736645741,
+    "histogram_drift": 1.1425632377878965,
+    "histogram_p_value": 7.077074257155956e-18,
+    "overall_drift_score": 0.5360358843502049
+  },
+  "timestamp": "2026-01-28 02:41:18.228011"
+}

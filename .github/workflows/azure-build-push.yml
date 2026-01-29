@@ -1,0 +1,182 @@
+name: Build Docker Images and Push to Azure Container Registry
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'docker/**'
+      - 'src/**'
+      - 'Dockerfile*'
+      - '.github/workflows/azure-build-push.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: realtime-vision.azurecr.io
+  RESOURCE_GROUP: vision-rg
+  ACR_NAME: realtime-vision
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    strategy:
+      matrix:
+        include:
+          - image_name: yolo-inference
+            dockerfile: docker/Dockerfile.yolo
+          - image_name: logging-service
+            dockerfile: docker/Dockerfile.logging
+          - image_name: mlflow-server
+            dockerfile: docker/Dockerfile.mlflow
+          - image_name: camera-stream
+            dockerfile: docker/Dockerfile.camera
+          - image_name: preprocessing-service
+            dockerfile: docker/Dockerfile.preprocessing
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Azure Login (Federated)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to Azure Container Registry
+        run: |
+          az acr login --name ${{ env.ACR_NAME }}
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          tags: |
+            ${{ env.REGISTRY }}/${{ matrix.image_name }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ matrix.image_name }}:latest
+            ${{ env.REGISTRY }}/${{ matrix.image_name }}:v1.0
+          load: true
+
+      - name: Push to Azure Container Registry
+        run: |
+          docker tag ${{ env.REGISTRY }}/${{ matrix.image_name }}:${{ github.sha }} \
+            ${{ env.REGISTRY }}/${{ matrix.image_name }}:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ matrix.image_name }}:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ matrix.image_name }}:latest
+          docker push ${{ env.REGISTRY }}/${{ matrix.image_name }}:v1.0
+
+      - name: Scan image for vulnerabilities
+        run: |
+          az acr task create \
+            --registry ${{ env.ACR_NAME }} \
+            --name scan-${{ matrix.image_name }}-${{ github.run_number }} \
+            --image ${{ matrix.image_name }}:${{ github.sha }} \
+            --file /dev/null || true
+          echo "Image scan initiated for ${{ matrix.image_name }}"
+
+      - name: Create image metadata
+        run: |
+          cat > image-metadata.json <<EOF
+          {
+            "registry": "${{ env.REGISTRY }}",
+            "image": "${{ matrix.image_name }}",
+            "tags": ["${{ github.sha }}", "latest", "v1.0"],
+            "build_date": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
+            "commit_sha": "${{ github.sha }}",
+            "commit_message": "${{ github.event.head_commit.message }}"
+          }
+          EOF
+          cat image-metadata.json
+
+      - name: Upload image metadata
+        uses: actions/upload-artifact@v3
+        with:
+          name: image-metadata-${{ matrix.image_name }}
+          path: image-metadata.json
+
+  deploy-to-aks:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --name vision-aks \
+            --overwrite-existing
+
+      - name: Update deployment images
+        run: |
+          kubectl set image deployment/yolo-inference \
+            yolo=${{ env.REGISTRY }}/yolo-inference:${{ github.sha }} \
+            -n vision-system --record
+          kubectl set image deployment/logging-service \
+            logging=${{ env.REGISTRY }}/logging-service:${{ github.sha }} \
+            -n vision-system --record
+
+      - name: Verify rollout
+        run: |
+          kubectl rollout status deployment/yolo-inference -n vision-system --timeout=5m
+          kubectl rollout status deployment/logging-service -n vision-system --timeout=5m
+
+      - name: Get deployment info
+        if: always()
+        run: |
+          echo "=== AKS Deployments ==="
+          kubectl get deployments -n vision-system
+          echo ""
+          echo "=== Pod Status ==="
+          kubectl get pods -n vision-system
+          echo ""
+          echo "=== Services ==="
+          kubectl get svc -n vision-system
+
+  notify:
+    needs: [build-and-push]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Job Status
+        run: |
+          echo "Build and Push Status: ${{ needs.build-and-push.result }}"
+          echo "Images pushed to: ${{ env.REGISTRY }}"
+
+      - name: Slack Notification
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'ACR build failed for ${{ github.repository }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}

@@ -1,0 +1,27 @@
+{
+  "database": {
+    "url": "sqlite:///./vision_logs.db",
+    "echo": false,
+    "pool_size": 10,
+    "max_overflow": 20,
+    "auto_migrate": true
+  },
+  "storage": {
+    "base_path": "./prediction_images",
+    "organize_by_date": true,
+    "organize_by_result": true,
+    "image_quality": 95,
+    "max_image_age_days": 90
+  },
+  "logging": {
+    "log_level": "INFO",
+    "log_file": "./logs/vision_logger.log",
+    "log_format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "max_bytes": 10485760,
+    "backup_count": 5
+  },
+  "model_version": "yolov8m_v1.0",
+  "model_name": "yolov8m",
+  "enable_async_writes": false,
+  "batch_size": 10
+}
