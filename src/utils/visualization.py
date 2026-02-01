@@ -240,6 +240,55 @@ class Visualizer:
             grid[y:y+h, x:x+w] = img
         
         return grid
+
+
+def draw_bounding_boxes(
+    image: np.ndarray,
+    boxes: List[List[float]],
+    labels: List[str],
+    confidences: List[float],
+    colors: Optional[List[Tuple[int, int, int]]] = None,
+    thickness: int = 2,
+    font_scale: float = 0.5,
+    font_thickness: int = 2,
+    show_confidence: bool = True,
+    alpha: float = 0.8
+) -> np.ndarray:
+    """
+    Draw multiple bounding boxes on an image.
+    
+    Args:
+        image: Input image (BGR format)
+        boxes: List of bounding boxes [[x1, y1, x2, y2], ...]
+        labels: List of class labels
+        confidences: List of confidence scores
+        colors: Optional list of BGR colors for each box
+        thickness: Line thickness
+        font_scale: Font size scale
+        font_thickness: Font thickness
+        show_confidence: Whether to show confidence in label
+        alpha: Transparency for label background
+        
+    Returns:
+        Image with drawn bounding boxes
+        
+    Example:
+        >>> boxes = [[100, 100, 200, 200], [300, 300, 400, 400]]
+        >>> labels = ['person', 'car']
+        >>> confidences = [0.95, 0.87]
+        >>> result = draw_bounding_boxes(image, boxes, labels, confidences)
+    """
+    result = image.copy()
+    
+    if colors is None:
+        colors = [(0, 255, 0)] * len(boxes)
+    
+    for i, (box, label, conf, color) in enumerate(zip(boxes, labels, confidences, colors)):
+        x1, y1, x2, y2 = map(int, box)
+        
+        # Draw bounding box
+        cv2.rectangle(result, (x1, y1), (x2, y2), color, thickness)
+        
         # Create label text
         if show_confidence:
             label_text = f"{label} {conf:.2f}"

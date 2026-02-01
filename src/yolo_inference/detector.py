@@ -113,7 +113,12 @@ class YOLODetector:
         )
     
     def _setup_device(self, device: str) -> torch.device:
-        """
+        """Set up the compute device for inference."""
+        if device == "auto":
+            if torch.cuda.is_available():
+                return torch.device("cuda")
+            return torch.device("cpu")
+        return torch.device(device)
     
     def warmup(self, input_size: Tuple[int, int] = (640, 640), iterations: int = 3):
         """
@@ -178,6 +183,9 @@ class YOLODetector:
             f"YOLODetector(model={self.model_path.name}, "
             f"device={self.device}, loaded={self.is_loaded})"
         )
+    
+    def _setup_device_extended(self, device: str) -> torch.device:
+        """
         Setup compute device (GPU/CPU).
         
         Args:

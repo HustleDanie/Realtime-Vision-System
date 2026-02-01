@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.monitoring_api.routers import inspection_logs, metrics, model_status, health
+from src.monitoring_api.routers import inspection_logs, metrics, model_status, health, prediction
 
 app = FastAPI(
     title="AI Monitoring Dashboard API",
@@ -16,6 +16,8 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:3001",
+        "http://localhost:3003",
+        "http://127.0.0.1:3003",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -26,6 +28,7 @@ app.include_router(inspection_logs.router, prefix="/api")
 app.include_router(metrics.router, prefix="/api")
 app.include_router(model_status.router, prefix="/api")
 app.include_router(health.router, prefix="/api")
+app.include_router(prediction.router, prefix="/api")
 
 
 @app.get("/")

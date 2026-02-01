@@ -119,7 +119,7 @@ class LabelingTask(Base):
     defect_detected = Column(Boolean, nullable=True)
     model_version = Column(String(50), nullable=True, index=True)
     model_name = Column(String(100), nullable=True)
-    metadata = Column(Text, nullable=True)  # JSON blob with bbox, reason, etc.
+    extra_data = Column(Text, nullable=True)  # JSON blob with bbox, reason, etc.
 
     __table_args__ = (
         Index("idx_labeling_status_ts", "status", "timestamp"),
@@ -136,7 +136,7 @@ class LabelingTask(Base):
             "defect_detected": self.defect_detected,
             "model_version": self.model_version,
             "model_name": self.model_name,
-            "metadata": self.metadata,
+            "extra_data": self.extra_data,
         }
 
 

@@ -95,3 +95,36 @@ def get_model_status(db: Session):
         "total_predictions": total,
         "defects_detected": defects,
     }
+
+
+def create_inspection_log(
+    db: Session,
+    image_id: str,
+    image_path: str,
+    model_version: Optional[str] = None,
+    model_name: Optional[str] = None,
+    confidence_score: Optional[float] = None,
+    defect_detected: Optional[bool] = None,
+    defect_type: Optional[str] = None,
+    bounding_boxes: Optional[str] = None,
+    inference_time_ms: Optional[float] = None,
+    processing_notes: Optional[str] = None,
+) -> PredictionLog:
+    """Create a new inspection log entry."""
+    log = PredictionLog(
+        image_id=image_id,
+        image_path=image_path,
+        timestamp=datetime.now(),
+        model_version=model_version,
+        model_name=model_name,
+        confidence_score=confidence_score,
+        defect_detected=defect_detected,
+        defect_type=defect_type,
+        bounding_boxes=bounding_boxes,
+        inference_time_ms=inference_time_ms,
+        processing_notes=processing_notes,
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+    return log
