@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from sqlalchemy import func
@@ -21,6 +21,51 @@ def get_inspection_logs(
     if model_name:
         query = query.filter(PredictionLog.model_name == model_name)
 
+    return (
+        query.order_by(PredictionLog.timestamp.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+
+def get_inspection_logs_advanced(
+    db: Session,
+    limit: int = 50,
+    offset: int = 0,
+    defects_only: bool = False,
+    model_name: Optional[str] = None,
+    min_confidence: Optional[float] = None,
+    max_confidence: Optional[float] = None,
+    defect_type: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    days_back: Optional[int] = None,
+) -> List[PredictionLog]:
+    """Get inspection logs with advanced filtering."""
+    query = db.query(PredictionLog)
+    
+    if defects_only:
+        query = query.filter(PredictionLog.defect_detected == True)
+    if model_name:
+        query = query.filter(PredictionLog.model_name == model_name)
+    if defect_type:
+        query = query.filter(PredictionLog.defect_type == defect_type)
+    if min_confidence is not None:
+        query = query.filter(PredictionLog.confidence_score >= min_confidence)
+    if max_confidence is not None:
+        query = query.filter(PredictionLog.confidence_score <= max_confidence)
+    
+    # Date filtering
+    if days_back:
+        cutoff_date = datetime.now() - timedelta(days=days_back)
+        query = query.filter(PredictionLog.timestamp >= cutoff_date)
+    else:
+        if start_date:
+            query = query.filter(PredictionLog.timestamp >= start_date)
+        if end_date:
+            query = query.filter(PredictionLog.timestamp <= end_date)
+    
     return (
         query.order_by(PredictionLog.timestamp.desc())
         .offset(offset)
@@ -128,3 +173,4 @@ def create_inspection_log(
     db.commit()
     db.refresh(log)
     return log
+

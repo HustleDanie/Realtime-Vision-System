@@ -331,6 +331,171 @@ async def predict_from_base64(
         raise HTTPException(status_code=500, detail=f"Failed to process image: {str(e)}")
 
 
+@router.post("/batch", response_model=List[PredictionResult])
+async def predict_batch(
+    files: List[UploadFile] = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Run defect detection on multiple image files at once.
+    Useful for batch processing inspection campaigns.
+    """
+    if len(files) > 100:
+        raise HTTPException(status_code=400, detail="Maximum 100 images per batch")
+    
+    results = []
+    allowed_types = ["image/jpeg", "image/png", "image/webp", "image/jpg"]
+    
+    for file in files:
+        try:
+            if file.content_type not in allowed_types:
+                continue
+            
+            contents = await file.read()
+            image = Image.open(BytesIO(contents))
+            image_np = np.array(image)
+            
+            if len(image_np.shape) == 3 and image_np.shape[2] == 4:
+                image_np = image_np[:, :, :3]
+            
+            result = run_inference(image_np)
+            image_id = f"BATCH_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+            
+            annotated_base64 = None
+            if result['bounding_boxes']:
+                try:
+                    import cv2
+                    annotated = draw_annotations(image_np, result['bounding_boxes'])
+                    annotated_base64 = image_to_base64(annotated)
+                except ImportError:
+                    pass
+            
+            try:
+                import json
+                crud.create_inspection_log(
+                    db=db,
+                    image_id=image_id,
+                    image_path=file.filename or "batch_image",
+                    model_version="v1.0",
+                    model_name="yolo_defect_detector",
+                    confidence_score=result['confidence_score'],
+                    defect_detected=result['defect_detected'],
+                    defect_type=result['defect_type'],
+                    bounding_boxes=json.dumps(result['bounding_boxes']) if result['bounding_boxes'] else None,
+                    inference_time_ms=result['inference_time_ms'],
+                    processing_notes="Batch processing"
+                )
+            except Exception as e:
+                print(f"Failed to save to database: {e}")
+            
+            results.append(PredictionResult(
+                image_id=image_id,
+                defect_detected=result['defect_detected'],
+                confidence_score=result['confidence_score'],
+                defect_type=result['defect_type'],
+                bounding_boxes=result['bounding_boxes'],
+                inference_time_ms=result['inference_time_ms'],
+                timestamp=datetime.now(),
+                annotated_image=annotated_base64
+            ))
+        except Exception as e:
+            print(f"Failed to process {file.filename}: {str(e)}")
+    
+    return results
+
+
+@router.post("/video-frames", response_model=List[PredictionResult])
+async def predict_video_frames(
+    files: List[UploadFile] = File(...),
+    skip_frames: int = 1,
+    db: Session = Depends(get_db)
+):
+    """
+    Process multiple frames from video at specified interval.
+    skip_frames: Process every nth frame (default 1 = all frames)
+    """
+    import cv2
+    
+    if len(files) > 50:
+        raise HTTPException(status_code=400, detail="Maximum 50 video files per request")
+    
+    results = []
+    frame_count = 0
+    
+    for file in files:
+        try:
+            contents = await file.read()
+            temp_path = f"/tmp/{uuid.uuid4().hex}.mp4"
+            
+            # Save temp file
+            with open(temp_path, 'wb') as f:
+                f.write(contents)
+            
+            # Process video
+            cap = cv2.VideoCapture(temp_path)
+            frame_index = 0
+            
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                
+                if frame_index % skip_frames == 0:
+                    result = run_inference(frame)
+                    image_id = f"VID_{file.filename.split('.')[0]}_{frame_index}"
+                    
+                    annotated_base64 = None
+                    if result['bounding_boxes']:
+                        try:
+                            annotated = draw_annotations(frame, result['bounding_boxes'])
+                            annotated_base64 = image_to_base64(annotated)
+                        except Exception:
+                            pass
+                    
+                    try:
+                        import json
+                        crud.create_inspection_log(
+                            db=db,
+                            image_id=image_id,
+                            image_path=f"{file.filename}#frame{frame_index}",
+                            model_version="v1.0",
+                            model_name="yolo_defect_detector",
+                            confidence_score=result['confidence_score'],
+                            defect_detected=result['defect_detected'],
+                            defect_type=result['defect_type'],
+                            bounding_boxes=json.dumps(result['bounding_boxes']) if result['bounding_boxes'] else None,
+                            inference_time_ms=result['inference_time_ms'],
+                            processing_notes=f"Video frame {frame_index}"
+                        )
+                    except Exception as e:
+                        print(f"Failed to save frame: {e}")
+                    
+                    results.append(PredictionResult(
+                        image_id=image_id,
+                        defect_detected=result['defect_detected'],
+                        confidence_score=result['confidence_score'],
+                        defect_type=result['defect_type'],
+                        bounding_boxes=result['bounding_boxes'],
+                        inference_time_ms=result['inference_time_ms'],
+                        timestamp=datetime.now(),
+                        annotated_image=annotated_base64
+                    ))
+                    frame_count += 1
+                
+                frame_index += 1
+            
+            cap.release()
+            os.remove(temp_path)
+            
+        except Exception as e:
+            print(f"Failed to process video {file.filename}: {str(e)}")
+    
+    return {
+        "frames_processed": frame_count,
+        "results": results
+    }
+
+
 @router.get("/status")
 async def get_prediction_status():
     """Check if the prediction service is available."""

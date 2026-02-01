@@ -119,6 +119,10 @@ class LabelingTask(Base):
     defect_detected = Column(Boolean, nullable=True)
     model_version = Column(String(50), nullable=True, index=True)
     model_name = Column(String(100), nullable=True)
+    reason = Column(String(100), nullable=True)  # "low_confidence", "drift", etc.
+    human_label = Column(String(100), nullable=True)
+    reviewer_notes = Column(Text, nullable=True)
+    labeled_at = Column(DateTime, nullable=True)
     extra_data = Column(Text, nullable=True)  # JSON blob with bbox, reason, etc.
 
     __table_args__ = (
@@ -136,7 +140,85 @@ class LabelingTask(Base):
             "defect_detected": self.defect_detected,
             "model_version": self.model_version,
             "model_name": self.model_name,
+            "reason": self.reason,
+            "human_label": self.human_label,
+            "reviewer_notes": self.reviewer_notes,
+            "labeled_at": self.labeled_at.isoformat() if self.labeled_at else None,
             "extra_data": self.extra_data,
+        }
+
+
+class ReviewedLabel(Base):
+    """Approved labels ready for retraining."""
+
+    __tablename__ = "reviewed_labels"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    image_id = Column(String(255), nullable=False, unique=True, index=True)
+    image_path = Column(String(512), nullable=False)
+    label = Column(String(100), nullable=False)
+    confidence = Column(Float, nullable=True)
+    reviewer = Column(String(100), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    used_for_training = Column(Boolean, nullable=False, default=False)
+    export_path = Column(String(512), nullable=True)
+
+    __table_args__ = (
+        Index("idx_reviewed_training", "used_for_training", "created_at"),
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "image_id": self.image_id,
+            "image_path": self.image_path,
+            "label": self.label,
+            "confidence": self.confidence,
+            "reviewer": self.reviewer,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "used_for_training": self.used_for_training,
+            "export_path": self.export_path,
+        }
+
+
+class RetrainingEvent(Base):
+    """Track retraining pipeline events."""
+
+    __tablename__ = "retraining_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(String(100), nullable=False, unique=True, index=True)
+    triggered_by = Column(String(50), nullable=False)  # "drift" or "new_labels"
+    drift_score = Column(Float, nullable=True)
+    new_labels_count = Column(Integer, nullable=True)
+    status = Column(String(50), nullable=False, default="started")  # started, running, completed, failed
+    model_version = Column(String(50), nullable=True)
+    previous_model_version = Column(String(50), nullable=True)
+    new_model_version = Column(String(50), nullable=True)
+    improvement_metrics = Column(Text, nullable=True)  # JSON with new vs old metrics
+    started_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    completed_at = Column(DateTime, nullable=True)
+    error_message = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("idx_retraining_status", "status", "started_at"),
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "event_id": self.event_id,
+            "triggered_by": self.triggered_by,
+            "drift_score": self.drift_score,
+            "new_labels_count": self.new_labels_count,
+            "status": self.status,
+            "model_version": self.model_version,
+            "previous_model_version": self.previous_model_version,
+            "new_model_version": self.new_model_version,
+            "improvement_metrics": self.improvement_metrics,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "error_message": self.error_message,
         }
 
 

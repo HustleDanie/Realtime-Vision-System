@@ -1,266 +1,413 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { 
-  Tags, Image as ImageIcon, CheckCircle, XCircle, 
-  ChevronLeft, ChevronRight, Maximize2, RotateCw,
-  Download, Upload, AlertTriangle, Clock
-} from "lucide-react"
-import { DashboardLayout } from "@/components/dashboard-layout"
+import { useEffect, useState } from "react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Check, X, Skip } from "lucide-react";
+import Link from "next/link";
+import Image from "next/image";
 
 interface QueueItem {
-  id: string
-  imageId: string
-  predictedLabel: string
-  confidence: number
-  timestamp: string
-  status: "pending" | "labeled" | "skipped"
+  id: number;
+  image_id: string;
+  image_path: string;
+  timestamp: string;
+  status: string;
+  confidence_score: number;
+  defect_detected: boolean;
+  reason: string;
+  model_version: string;
+}
+
+interface QueueStats {
+  pending_count: number;
+  labeled_count: number;
+  approved_count: number;
+  ready_for_training: number;
 }
 
 export default function LabelingQueuePage() {
-  const [currentIndex, setCurrentIndex] = useState(0)
-  const [selectedLabel, setSelectedLabel] = useState<string | null>(null)
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [stats, setStats] = useState<QueueStats | null>(null);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [label, setLabel] = useState("");
+  const [notes, setNotes] = useState("");
+  const [message, setMessage] = useState("");
 
-  const queueItems: QueueItem[] = [
-    { id: "1", imageId: "IMG_20260130_001", predictedLabel: "scratch", confidence: 0.72, timestamp: "2026-01-30T10:15:00", status: "pending" },
-    { id: "2", imageId: "IMG_20260130_002", predictedLabel: "dent", confidence: 0.68, timestamp: "2026-01-30T10:16:00", status: "pending" },
-    { id: "3", imageId: "IMG_20260130_003", predictedLabel: "normal", confidence: 0.55, timestamp: "2026-01-30T10:17:00", status: "pending" },
-    { id: "4", imageId: "IMG_20260130_004", predictedLabel: "crack", confidence: 0.61, timestamp: "2026-01-30T10:18:00", status: "pending" },
-    { id: "5", imageId: "IMG_20260130_005", predictedLabel: "stain", confidence: 0.58, timestamp: "2026-01-30T10:19:00", status: "pending" },
-  ]
+  useEffect(() => {
+    fetchQueue();
+    fetchStats();
+    const interval = setInterval(fetchStats, 5000); // Refresh stats every 5 seconds
+    return () => clearInterval(interval);
+  }, []);
 
-  const labels = ["scratch", "dent", "crack", "stain", "chip", "normal", "other"]
-  const currentItem = queueItems[currentIndex]
+  const fetchQueue = async () => {
+    try {
+      const response = await fetch("/api/labeling/queue?status=pending&limit=100");
+      if (response.ok) {
+        const data = await response.json();
+        setQueue(data);
+        if (data.length === 0) {
+          setMessage("All items labeled! Queue is empty.");
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching queue:", error);
+      setMessage("Error loading queue");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchStats = async () => {
+    try {
+      const response = await fetch("/api/labeling/stats");
+      if (response.ok) {
+        const data = await response.json();
+        setStats(data);
+      }
+    } catch (error) {
+      console.error("Error fetching stats:", error);
+    }
+  };
+
+  const handleSubmitLabel = async () => {
+    if (!label) {
+      setMessage("Please select a label");
+      return;
+    }
+
+    if (currentIndex >= queue.length) {
+      setMessage("No more items to label");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const response = await fetch("/api/labeling/submit-label", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          queue_id: queue[currentIndex].id,
+          label: label,
+          reviewer_notes: notes,
+        }),
+      });
+
+      if (response.ok) {
+        setMessage("Label submitted successfully!");
+        setLabel("");
+        setNotes("");
+        
+        // Remove the current item from queue
+        const newQueue = queue.filter((_, i) => i !== currentIndex);
+        setQueue(newQueue);
+        
+        // Adjust current index
+        if (currentIndex >= newQueue.length && currentIndex > 0) {
+          setCurrentIndex(currentIndex - 1);
+        }
+        
+        fetchStats();
+        
+        // Clear message after 2 seconds
+        setTimeout(() => setMessage(""), 2000);
+      } else {
+        setMessage("Error submitting label");
+      }
+    } catch (error) {
+      console.error("Error submitting label:", error);
+      setMessage("Error submitting label");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSkip = async () => {
+    if (currentIndex >= queue.length) return;
+
+    try {
+      const response = await fetch(
+        `/api/labeling/skip/${queue[currentIndex].id}`,
+        { method: "GET" }
+      );
+
+      if (response.ok) {
+        const newQueue = queue.filter((_, i) => i !== currentIndex);
+        setQueue(newQueue);
+        
+        if (currentIndex >= newQueue.length && currentIndex > 0) {
+          setCurrentIndex(currentIndex - 1);
+        }
+        
+        setLabel("");
+        setNotes("");
+        setMessage("Item skipped");
+        setTimeout(() => setMessage(""), 2000);
+      }
+    } catch (error) {
+      console.error("Error skipping item:", error);
+      setMessage("Error skipping item");
+    }
+  };
+
+  const handlePrevious = () => {
+    if (currentIndex > 0) {
+      setCurrentIndex(currentIndex - 1);
+      setLabel("");
+      setNotes("");
+      setMessage("");
+    }
+  };
 
   const handleNext = () => {
-    if (currentIndex < queueItems.length - 1) {
-      setCurrentIndex(prev => prev + 1)
-      setSelectedLabel(null)
+    if (currentIndex < queue.length - 1) {
+      setCurrentIndex(currentIndex + 1);
+      setLabel("");
+      setNotes("");
+      setMessage("");
     }
-  }
+  };
 
-  const handlePrev = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex(prev => prev - 1)
-      setSelectedLabel(null)
-    }
-  }
-
-  const handleSubmit = () => {
-    if (selectedLabel) {
-      // Submit label and move to next
-      handleNext()
-    }
-  }
+  const currentItem = queue[currentIndex];
 
   return (
-    <DashboardLayout>
+    <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 text-white p-6">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-black dark:text-white">Labeling Queue</h1>
-          <p className="text-sm text-gray-500 mt-1">Review and label low-confidence predictions</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button className="flex items-center gap-2 px-3 py-2 border border-gray-200 dark:border-gray-800 rounded-lg text-sm">
-            <Upload className="h-4 w-4" />
-            Import Images
-          </button>
-          <button className="flex items-center gap-2 px-3 py-2 border border-gray-200 dark:border-gray-800 rounded-lg text-sm">
-            <Download className="h-4 w-4" />
-            Export Labels
-          </button>
-        </div>
-      </div>
-
-      {/* Stats Bar */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <StatCard title="In Queue" value={queueItems.length} icon={Clock} color="blue" />
-        <StatCard title="Labeled Today" value={156} icon={CheckCircle} color="green" />
-        <StatCard title="Skipped" value={12} icon={XCircle} color="gray" />
-        <StatCard title="Low Confidence" value={queueItems.filter(i => i.confidence < 0.7).length} icon={AlertTriangle} color="yellow" />
-      </div>
-
-      {/* Main Labeling Area */}
-      <div className="grid grid-cols-3 gap-6">
-        {/* Image Viewer */}
-        <div className="col-span-2 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
-          {/* Toolbar */}
-          <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handlePrev}
-                disabled={currentIndex === 0}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg disabled:opacity-50"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </button>
-              <span className="text-sm text-gray-600 dark:text-gray-400">
-                {currentIndex + 1} / {queueItems.length}
-              </span>
-              <button
-                onClick={handleNext}
-                disabled={currentIndex === queueItems.length - 1}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg disabled:opacity-50"
-              >
-                <ChevronRight className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="flex items-center gap-2">
-              <button className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg">
-                <RotateCw className="h-5 w-5 text-gray-500" />
-              </button>
-              <button className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg">
-                <Maximize2 className="h-5 w-5 text-gray-500" />
-              </button>
-            </div>
-          </div>
-
-          {/* Image Display */}
-          <div className="aspect-video bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-            <div className="text-center">
-              <ImageIcon className="h-16 w-16 mx-auto text-gray-400 mb-4" />
-              <p className="text-sm text-gray-500">{currentItem?.imageId}</p>
-              <p className="text-xs text-gray-400 mt-1">No preview available</p>
-            </div>
-          </div>
-
-          {/* Image Info */}
-          <div className="p-4 border-t border-gray-100 dark:border-gray-800">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-black dark:text-white">{currentItem?.imageId}</p>
-                <p className="text-xs text-gray-500">{currentItem?.timestamp}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm text-gray-500">Predicted: <span className="font-medium text-black dark:text-white capitalize">{currentItem?.predictedLabel}</span></p>
-                <p className="text-xs text-gray-500">Confidence: {((currentItem?.confidence || 0) * 100).toFixed(1)}%</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Labeling Panel */}
-        <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-6">
-          <h3 className="text-sm font-semibold text-black dark:text-white uppercase tracking-wider mb-4">
-            Select Label
-          </h3>
-
-          {/* Label Options */}
-          <div className="space-y-2 mb-6">
-            {labels.map((label) => (
-              <button
-                key={label}
-                onClick={() => setSelectedLabel(label)}
-                className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border transition-all ${
-                  selectedLabel === label
-                    ? "border-black dark:border-white bg-black dark:bg-white text-white dark:text-black"
-                    : label === currentItem?.predictedLabel
-                    ? "border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200"
-                    : "border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700"
-                }`}
-              >
-                <span className="capitalize font-medium">{label}</span>
-                {label === currentItem?.predictedLabel && (
-                  <span className="text-xs bg-blue-200 dark:bg-blue-800 px-2 py-0.5 rounded-full">
-                    Predicted
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-
-          {/* Actions */}
-          <div className="space-y-3">
-            <button
-              onClick={handleSubmit}
-              disabled={!selectedLabel}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-black dark:bg-white text-white dark:text-black rounded-lg font-medium disabled:opacity-50"
+      <div className="max-w-6xl mx-auto mb-8">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <Link
+              href="/dashboard"
+              className="p-2 hover:bg-slate-700 rounded-lg transition"
             >
-              <CheckCircle className="h-4 w-4" />
-              Submit Label
-            </button>
-            <button
-              onClick={handleNext}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 border border-gray-200 dark:border-gray-800 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
-            >
-              <XCircle className="h-4 w-4" />
-              Skip
-            </button>
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+            <h1 className="text-3xl font-bold">Labeling Queue</h1>
           </div>
+        </div>
 
-          {/* Keyboard Shortcuts */}
-          <div className="mt-6 pt-6 border-t border-gray-100 dark:border-gray-800">
-            <p className="text-xs text-gray-500 mb-2">Keyboard Shortcuts</p>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="flex items-center gap-2">
-                <kbd className="px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded">1-7</kbd>
-                <span className="text-gray-500">Select label</span>
+        {/* Stats Cards */}
+        {stats && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <div className="bg-slate-700 rounded-lg p-4">
+              <p className="text-slate-400 text-sm mb-1">Pending</p>
+              <p className="text-2xl font-bold">{stats.pending_count}</p>
+            </div>
+            <div className="bg-slate-700 rounded-lg p-4">
+              <p className="text-slate-400 text-sm mb-1">Labeled</p>
+              <p className="text-2xl font-bold">{stats.labeled_count}</p>
+            </div>
+            <div className="bg-slate-700 rounded-lg p-4">
+              <p className="text-slate-400 text-sm mb-1">Approved</p>
+              <p className="text-2xl font-bold">{stats.approved_count}</p>
+            </div>
+            <div className="bg-blue-600/20 border border-blue-500 rounded-lg p-4">
+              <p className="text-slate-400 text-sm mb-1">Ready for Training</p>
+              <p className="text-2xl font-bold">{stats.ready_for_training}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Message */}
+        {message && (
+          <div className="bg-blue-600/20 border border-blue-500 rounded-lg p-3 mb-6">
+            {message}
+          </div>
+        )}
+      </div>
+
+      {/* Main Content */}
+      <div className="max-w-6xl mx-auto">
+        {loading ? (
+          <div className="text-center py-12">
+            <p className="text-slate-400">Loading queue...</p>
+          </div>
+        ) : queue.length === 0 ? (
+          <div className="text-center py-12 bg-slate-700 rounded-lg">
+            <p className="text-xl text-slate-400">No items to label</p>
+            <p className="text-slate-500 mt-2">
+              All predictions have been reviewed or queue is empty
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Image Viewer */}
+            <div className="lg:col-span-2">
+              <div className="bg-slate-700 rounded-lg p-6">
+                <div className="mb-4">
+                  <h2 className="text-lg font-semibold mb-2">Image Viewer</h2>
+                  <p className="text-slate-400 text-sm">
+                    {currentIndex + 1} of {queue.length}
+                  </p>
+                </div>
+
+                {/* Image */}
+                <div className="bg-black rounded-lg overflow-hidden mb-4 aspect-video flex items-center justify-center relative">
+                  {currentItem.image_path ? (
+                    <div className="relative w-full h-full">
+                      <Image
+                        src={currentItem.image_path}
+                        alt={currentItem.image_id}
+                        fill
+                        className="object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div className="text-slate-500">No image available</div>
+                  )}
+                </div>
+
+                {/* Item Details */}
+                <div className="bg-slate-600 rounded-lg p-4 mb-4 space-y-2 text-sm">
+                  <div>
+                    <p className="text-slate-400">Image ID:</p>
+                    <p className="font-mono text-blue-400">{currentItem.image_id}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-400">Model Confidence:</p>
+                    <div className="flex items-center gap-2">
+                      <div className="w-full bg-slate-700 rounded-full h-2">
+                        <div
+                          className={`h-2 rounded-full transition-all ${
+                            currentItem.confidence_score > 0.7
+                              ? "bg-green-500"
+                              : currentItem.confidence_score > 0.5
+                              ? "bg-yellow-500"
+                              : "bg-red-500"
+                          }`}
+                          style={{
+                            width: `${currentItem.confidence_score * 100}%`,
+                          }}
+                        />
+                      </div>
+                      <span className="font-mono">
+                        {(currentItem.confidence_score * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-slate-400">Reason:</p>
+                    <p>{currentItem.reason}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-400">Model Version:</p>
+                    <p>{currentItem.model_version}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-400">Timestamp:</p>
+                    <p>{new Date(currentItem.timestamp).toLocaleString()}</p>
+                  </div>
+                </div>
+
+                {/* Navigation */}
+                <div className="flex gap-2">
+                  <button
+                    onClick={handlePrevious}
+                    disabled={currentIndex === 0}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-slate-600 hover:bg-slate-500 disabled:bg-slate-800 disabled:text-slate-600 rounded-lg transition"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    Previous
+                  </button>
+                  <button
+                    onClick={handleNext}
+                    disabled={currentIndex === queue.length - 1}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-slate-600 hover:bg-slate-500 disabled:bg-slate-800 disabled:text-slate-600 rounded-lg transition"
+                  >
+                    Next
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <kbd className="px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded">Enter</kbd>
-                <span className="text-gray-500">Submit</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <kbd className="px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded">←→</kbd>
-                <span className="text-gray-500">Navigate</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <kbd className="px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded">S</kbd>
-                <span className="text-gray-500">Skip</span>
+            </div>
+
+            {/* Labeling Panel */}
+            <div className="lg:col-span-1">
+              <div className="bg-slate-700 rounded-lg p-6 sticky top-6">
+                <h3 className="text-lg font-semibold mb-4">Add Label</h3>
+
+                {/* Label Selection */}
+                <div className="mb-4">
+                  <label className="block text-sm text-slate-400 mb-2">
+                    Defect Type
+                  </label>
+                  <div className="space-y-2">
+                    {[
+                      "no_defect",
+                      "crack",
+                      "scratch",
+                      "dent",
+                      "discoloration",
+                      "uncertain",
+                    ].map((option) => (
+                      <button
+                        key={option}
+                        onClick={() => setLabel(option)}
+                        className={`w-full text-left px-4 py-2 rounded-lg transition ${
+                          label === option
+                            ? "bg-blue-600 text-white"
+                            : "bg-slate-600 text-slate-300 hover:bg-slate-500"
+                        }`}
+                      >
+                        {option.replace("_", " ").toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Notes */}
+                <div className="mb-4">
+                  <label className="block text-sm text-slate-400 mb-2">
+                    Notes (Optional)
+                  </label>
+                  <textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Add any relevant notes..."
+                    className="w-full bg-slate-600 text-white rounded-lg p-3 text-sm resize-none h-24 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                {/* Actions */}
+                <div className="space-y-2">
+                  <button
+                    onClick={handleSubmitLabel}
+                    disabled={submitting}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-500 disabled:bg-green-800 rounded-lg font-semibold transition"
+                  >
+                    <Check className="w-4 h-4" />
+                    Submit Label
+                  </button>
+                  <button
+                    onClick={handleSkip}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-600 hover:bg-slate-500 rounded-lg font-semibold transition"
+                  >
+                    <Skip className="w-4 h-4" />
+                    Skip
+                  </button>
+                </div>
+
+                {/* Progress */}
+                <div className="mt-6 pt-6 border-t border-slate-600">
+                  <p className="text-xs text-slate-400 mb-2">Progress</p>
+                  <div className="w-full bg-slate-600 rounded-full h-2">
+                    <div
+                      className="h-2 bg-blue-500 rounded-full transition-all"
+                      style={{
+                        width: `${((currentIndex + 1) / queue.length) * 100}%`,
+                      }}
+                    />
+                  </div>
+                  <p className="text-xs text-slate-400 mt-2">
+                    {currentIndex + 1} of {queue.length} items
+                  </p>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* Queue List */}
-      <div className="mt-6 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
-        <div className="p-4 border-b border-gray-100 dark:border-gray-800">
-          <h3 className="text-sm font-semibold text-black dark:text-white uppercase tracking-wider">
-            Queue ({queueItems.length} items)
-          </h3>
-        </div>
-        <div className="flex gap-2 p-4 overflow-x-auto">
-          {queueItems.map((item, index) => (
-            <button
-              key={item.id}
-              onClick={() => setCurrentIndex(index)}
-              className={`flex-shrink-0 w-24 h-24 rounded-lg border-2 flex flex-col items-center justify-center transition-all ${
-                index === currentIndex
-                  ? "border-black dark:border-white bg-gray-50 dark:bg-gray-800"
-                  : "border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700"
-              }`}
-            >
-              <ImageIcon className="h-8 w-8 text-gray-400 mb-1" />
-              <span className="text-xs text-gray-500 truncate w-full px-2 text-center">{item.imageId.slice(-3)}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-    </DashboardLayout>
-  )
-}
-
-function StatCard({ title, value, icon: Icon, color }: { title: string; value: number; icon: React.ElementType; color: string }) {
-  const colors = {
-    blue: "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400",
-    green: "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400",
-    yellow: "bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400",
-    gray: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
-  }
-
-  return (
-    <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4">
-      <div className="flex items-center gap-3">
-        <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${colors[color as keyof typeof colors]}`}>
-          <Icon className="h-5 w-5" />
-        </div>
-        <div>
-          <p className="text-xs text-gray-500 uppercase tracking-wider">{title}</p>
-          <p className="text-xl font-bold text-black dark:text-white">{value}</p>
-        </div>
+        )}
       </div>
     </div>
-  )
+  );
 }

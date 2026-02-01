@@ -1,4 +1,5 @@
 from typing import List, Optional
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
@@ -31,14 +32,35 @@ def list_inspection_logs(
     offset: int = Query(0, ge=0),
     defects_only: bool = False,
     model_name: Optional[str] = None,
+    min_confidence: Optional[float] = Query(None, ge=0, le=1, description="Minimum confidence score"),
+    max_confidence: Optional[float] = Query(None, ge=0, le=1, description="Maximum confidence score"),
+    defect_type: Optional[str] = Query(None, description="Filter by specific defect type"),
+    start_date: Optional[datetime] = Query(None, description="Start date (ISO format)"),
+    end_date: Optional[datetime] = Query(None, description="End date (ISO format)"),
+    days_back: Optional[int] = Query(None, ge=1, le=365, description="Last N days"),
     db: Session = Depends(get_db),
 ):
-    return crud.get_inspection_logs(
+    """
+    List inspection logs with advanced filtering options.
+    
+    Supports:
+    - Confidence score range filtering
+    - Defect type filtering
+    - Date range filtering
+    - Time window filtering (last N days)
+    """
+    return crud.get_inspection_logs_advanced(
         db=db,
         limit=limit,
         offset=offset,
         defects_only=defects_only,
         model_name=model_name,
+        min_confidence=min_confidence,
+        max_confidence=max_confidence,
+        defect_type=defect_type,
+        start_date=start_date,
+        end_date=end_date,
+        days_back=days_back,
     )
 
 
