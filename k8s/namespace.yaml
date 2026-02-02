@@ -1,8 +1,0 @@
----
-# Kubernetes Namespace for vision system
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: vision-system
-  labels:
-    name: vision-system
