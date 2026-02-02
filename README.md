@@ -13,7 +13,7 @@ A modern, responsive web application built with Next.js and TypeScript featuring
 ## Project Structure
 
 ```
-omnisearch-frontend/
+website-design-samples/
 ├── src/
 │   ├── app/              # Next.js app router
 │   ├── components/       # Reusable React components
@@ -35,7 +35,7 @@ omnisearch-frontend/
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd omnisearch-frontend
+cd website-design-samples
 
 # Install dependencies
 npm install
