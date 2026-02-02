@@ -14,19 +14,23 @@ def get_inspection_logs(
     defects_only: bool = False,
     model_name: Optional[str] = None,
 ) -> List[PredictionLog]:
-    query = db.query(PredictionLog)
+    try:
+        query = db.query(PredictionLog)
 
-    if defects_only:
-        query = query.filter(PredictionLog.defect_detected == True)
-    if model_name:
-        query = query.filter(PredictionLog.model_name == model_name)
+        if defects_only:
+            query = query.filter(PredictionLog.defect_detected == True)
+        if model_name:
+            query = query.filter(PredictionLog.model_name == model_name)
 
-    return (
-        query.order_by(PredictionLog.timestamp.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+        return (
+            query.order_by(PredictionLog.timestamp.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+    except Exception as e:
+        print(f"Error in get_inspection_logs: {e}")
+        return []
 
 
 def get_inspection_logs_advanced(
@@ -43,35 +47,39 @@ def get_inspection_logs_advanced(
     days_back: Optional[int] = None,
 ) -> List[PredictionLog]:
     """Get inspection logs with advanced filtering."""
-    query = db.query(PredictionLog)
-    
-    if defects_only:
-        query = query.filter(PredictionLog.defect_detected == True)
-    if model_name:
-        query = query.filter(PredictionLog.model_name == model_name)
-    if defect_type:
-        query = query.filter(PredictionLog.defect_type == defect_type)
-    if min_confidence is not None:
-        query = query.filter(PredictionLog.confidence_score >= min_confidence)
-    if max_confidence is not None:
-        query = query.filter(PredictionLog.confidence_score <= max_confidence)
-    
-    # Date filtering
-    if days_back:
-        cutoff_date = datetime.now() - timedelta(days=days_back)
-        query = query.filter(PredictionLog.timestamp >= cutoff_date)
-    else:
-        if start_date:
-            query = query.filter(PredictionLog.timestamp >= start_date)
-        if end_date:
-            query = query.filter(PredictionLog.timestamp <= end_date)
-    
-    return (
-        query.order_by(PredictionLog.timestamp.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+    try:
+        query = db.query(PredictionLog)
+        
+        if defects_only:
+            query = query.filter(PredictionLog.defect_detected == True)
+        if model_name:
+            query = query.filter(PredictionLog.model_name == model_name)
+        if defect_type:
+            query = query.filter(PredictionLog.defect_type == defect_type)
+        if min_confidence is not None:
+            query = query.filter(PredictionLog.confidence_score >= min_confidence)
+        if max_confidence is not None:
+            query = query.filter(PredictionLog.confidence_score <= max_confidence)
+        
+        # Date filtering
+        if days_back:
+            cutoff_date = datetime.now() - timedelta(days=days_back)
+            query = query.filter(PredictionLog.timestamp >= cutoff_date)
+        else:
+            if start_date:
+                query = query.filter(PredictionLog.timestamp >= start_date)
+            if end_date:
+                query = query.filter(PredictionLog.timestamp <= end_date)
+        
+        return (
+            query.order_by(PredictionLog.timestamp.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+    except Exception as e:
+        print(f"Error in get_inspection_logs_advanced: {e}")
+        return []
 
 
 def get_inspection_log(db: Session, log_id: int) -> Optional[PredictionLog]:
