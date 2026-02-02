@@ -1,4 +1,78 @@
-# Real-Time Computer Vision System
+# Website Design Samples
+
+A modern, responsive web application built with Next.js and TypeScript featuring contemporary design patterns and best practices.
+
+## Features
+
+- ⚡ Built with Next.js 16+ for optimal performance
+- 🎨 Tailwind CSS for responsive design
+- 📱 Mobile-first approach
+- 🔧 TypeScript for type safety
+- 🎯 Modern component architecture
+
+## Project Structure
+
+```
+omnisearch-frontend/
+├── src/
+│   ├── app/              # Next.js app router
+│   ├── components/       # Reusable React components
+│   └── styles/           # Global styles
+├── public/               # Static assets
+├── package.json          # Dependencies and scripts
+└── tsconfig.json         # TypeScript configuration
+```
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 18+
+- npm or yarn
+
+### Installation
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd omnisearch-frontend
+
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
+```
+
+The application will be available at `http://localhost:3000`
+
+### Production Build
+
+```bash
+# Build for production
+npm run build
+
+# Start production server
+npm start
+```
+
+## Available Scripts
+
+- `npm run dev` - Start development server
+- `npm run build` - Build for production
+- `npm start` - Start production server
+- `npm run lint` - Run ESLint
+
+## Tech Stack
+
+- **Framework**: Next.js 16
+- **Language**: TypeScript
+- **Styling**: Tailwind CSS
+- **UI Components**: Custom React components
+
+## License
+
+This project is licensed under the MIT License - see LICENSE file for details.
 
 A production-ready real-time computer vision system with YOLO object detection, video streaming, and preprocessing capabilities.
 
